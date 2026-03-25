@@ -78,13 +78,13 @@
 >
 > 开发时长：累计 2 天（主插件部分）
 >
-> 累计工时：约 9 小时（主插件部分）
+> 累计工时：约 11 小时（主插件部分）
 >
 > 使用的大模型：GPT 5.4(With RooCode in VSCode)
 >
 > 对话窗口搭建：VSCode RooCode 扩展
 >
-> Tokens Used：30,436,300
+> Tokens Used：36,374,600
 
 ---
 
@@ -255,6 +255,7 @@ AstrBot/
          │
          ├─ services/
          │    ├─ __init__.py
+         │    ├─ app_descriptions.py         # 文案映射与标题模板数据
          │    ├─ dashboard_service.py        # 业务编排层
          │    ├─ message_renderer.py         # 文本渲染层
          │    └─ payload_client.py           # 上游请求层
@@ -281,75 +282,91 @@ flowchart TD
 
     %% ===== 入口层 =====
     subgraph U[用户与平台层]
-      A[用户发送指令<br/>/视奸 /live /dashboard<br/>或 @bot 状态]
+      A[用户发起查询]
       B[AstrBot 事件分发]
     end
 
-    subgraph E[插件入口层 main.py]
-      C[命令处理器<br/>query_live_dashboard]
-      C1[记录 sender/session 日志]
-      C2[黑名单前置拦截<br/>session_id / sender_id]
-      C3[调用 DashboardService]
+    subgraph E[插件入口层]
+      E1[命令查询入口]
+      E2[LLM 工具入口]
+      E3[记录日志与会话信息]
+      E4[黑名单拦截]
+      E5[调用服务层]
     end
 
     %% ===== 服务层 =====
-    subgraph S[业务服务层 services/dashboard_service.py]
-      D[query_and_render]
-      D1[校验 base_url / 鉴权参数]
-      D2[调用 payload_client 拉取 /api/current]
-      D3[调用 message_renderer 生成文案]
-      D4[计算最终展示设备数<br/>render_device_count]
-      D5[统一异常兜底<br/>超时/网络/HTTP/未知错误]
+    subgraph S[业务服务层]
+      S1[编排查询流程]
+      S2[复用 HTTP 客户端]
+      S3[拉取状态数据]
+      S4[渲染回复文本]
+      S5[计算展示设备数]
+      S6[统一异常处理]
     end
 
-    subgraph P[请求层 services/payload_client.py]
-      P1[构建 HTTP 请求<br/>base_url + /api/current]
-      P2[附加 Authorization Bearer Token (可选)]
-      P3[返回 payload(JSON)]
+    %% ===== 请求层 =====
+    subgraph P[请求层]
+      P1[组装接口地址]
+      P2[按需附加鉴权头]
+      P3[发送请求并校验返回]
+      P4[输出状态数据]
     end
 
-    subgraph R[渲染层 services/message_renderer.py]
-      R1[设备筛选<br/>离线开关/最大数量/设备黑白名单]
-      R2[个性化叙事文案<br/>app_name 映射 + title 模板]
-      R3[信息黑名单替换<br/>应用/标题字段脱敏]
-      R4[结构化补充信息<br/>🔋 电量 / 🎵 音乐 / 🕒 上报]
-      R5[产出渲染文本 message]
+    %% ===== 渲染层 =====
+    subgraph R[渲染层]
+      R1[设备筛选与排序]
+      R2[读取文案映射数据]
+      R3[生成活动叙事文本]
+      R4[执行信息脱敏替换]
+      R5[输出最终消息文本]
     end
 
-    %% ===== 发送策略 =====
-    subgraph O[输出策略层 main.py]
-      O0[命中黑名单：直接返回拒绝提示]
-      O1{render_device_count >= 2<br/>且平台=aiocqhttp ?}
-      O2[设备较少：引用回复 + 全量文本]
-      O3[设备较多：拆分段落为节点块]
-      O4[构造 Nodes(合并转发)<br/>首节点内嵌 Reply 引用]
+    %% ===== 数据模块 =====
+    subgraph D[静态文案数据模块]
+      D1[应用文案映射]
+      D2[标题模板映射]
+      D3[占位值与音乐应用集合]
+    end
+
+    %% ===== 输出层 =====
+    subgraph O[输出策略层]
+      O1{设备数量达到阈值且平台支持}
+      O2[引用回复发送]
+      O3[合并转发发送]
+      O4[命中黑名单直接拒绝]
     end
 
     %% ===== 数据流 =====
-    A --> B --> C --> C1 --> C2
-    C2 -->|命中黑名单| O0
-    C2 -->|未命中| C3 --> D
-    D --> D1 --> D2 --> P1 --> P2 --> P3 --> D3
-    D3 --> R1 --> R2 --> R3 --> R4 --> R5 --> D4
-    D --> D5
-    D4 --> O1
+    A --> B --> E1
+    B --> E2
+    E1 --> E3 --> E4
+    E2 --> E3 --> E4
+    E4 -->|命中| O4
+    E4 -->|放行| E5 --> S1 --> S2 --> S3
+    S3 --> P1 --> P2 --> P3 --> P4 --> S4
+    S4 --> R1 --> R2 --> R3 --> R4 --> R5 --> S5
+    D1 --> R2
+    D2 --> R2
+    D3 --> R2
+    S1 --> S6
+    S5 --> O1
     O1 -->|否| O2
-    O1 -->|是| O3 --> O4
+    O1 -->|是| O3
 
-    %% ===== 应用样式 =====
+    %% ===== 样式应用 =====
     class A user;
-    class B,C,C1,C2,C3 entry;
-    class D,D1,D2,D3,D4,D5 service;
-    class P1,P2,P3 io;
+    class B,E1,E2,E3,E4,E5 entry;
+    class S1,S2,S3,S4,S5,S6 service;
+    class P1,P2,P3,P4 io;
     class R1,R2,R3,R4,R5 logic;
-    class O0,O1,O2,O3,O4 output;
+    class O1,O2,O3,O4 output;
 ```
 
 ### 分层职责
 
 - `main.py`：AstrBot 接口层，负责事件与命令接入。
-- `services`：业务实现层，解耦请求、渲染、异常处理。
-- `utils`：跨模块可复用工具能力。
+- `services`：业务实现层，解耦请求、渲染、异常处理；其中 `app_descriptions.py` 仅承载静态文案数据，便于维护。
+- `utils`：跨模块可复用工具能力（如配置读取、列表文本解析、时间格式化）。
 
 ### 模块化代码结构
 

@@ -16,29 +16,13 @@ from astrbot.api.message_components import Node, Nodes, Plain, Reply
 from astrbot.api.provider import ProviderRequest
 
 from .services.dashboard_service import DashboardService
-from .utils.config_parser import get_text_value
+from .utils.config_parser import get_text_value, parse_list_config
 
 
 def _split_message_blocks(message: str) -> list[str]:
     """把渲染文本按空行分段，用于构建转发节点。"""
     blocks = [block.strip() for block in message.split("\n\n") if block.strip()]
     return blocks if blocks else [message.strip()]
-
-
-def _parse_list_config(raw_text: str) -> list[str]:
-    """解析列表型配置（支持逗号/分号/换行分隔）。"""
-    separators = [",", "，", ";", "；", "\n", "\r", "\t"]
-    normalized = raw_text
-    for separator in separators:
-        normalized = normalized.replace(separator, ",")
-
-    values: list[str] = []
-    for part in normalized.split(","):
-        value = part.strip()
-        if value:
-            values.append(value)
-
-    return values
 
 
 class LiveDashboardPlugin(star.Star):
@@ -55,9 +39,8 @@ class LiveDashboardPlugin(star.Star):
         self.dashboard_service = DashboardService(self.config)
 
         logger.info(
-            "[视奸面板] 插件初始化完成，base_url=%s, include_offline_devices=%s",
+            "[视奸面板] 插件初始化完成，服务地址=%s",
             str(self.config.get("base_url", "")).strip() or "<未配置>",
-            self.config.get("include_offline_devices", False),
         )
 
     def _get_query_denied_text(self, event: AstrMessageEvent) -> str | None:
@@ -66,10 +49,10 @@ class LiveDashboardPlugin(star.Star):
         session_id = str(getattr(event.message_obj, "session_id", "") or "").strip()
 
         # 群/用户黑名单都来自配置文本，先统一解析成列表。
-        group_blacklist = _parse_list_config(
+        group_blacklist = parse_list_config(
             get_text_value(self.config, "group_blacklist_sessions", "")
         )
-        user_blacklist = _parse_list_config(
+        user_blacklist = parse_list_config(
             get_text_value(self.config, "user_blacklist_senders", "")
         )
 
@@ -79,14 +62,14 @@ class LiveDashboardPlugin(star.Star):
             for blocked in group_blacklist
         )
         if is_group_blocked:
-            logger.info("[视奸面板] 群组黑名单命中，拒绝查询：session=%s", session_id)
+            logger.info("[视奸面板] 群组黑名单命中，拒绝查询：会话=%s", session_id)
             return "该群组已禁用状态查询喵。"
 
         is_user_blocked = bool(sender_id) and any(
             blocked == sender_id for blocked in user_blacklist
         )
         if is_user_blocked:
-            logger.info("[视奸面板] 用户黑名单命中，拒绝查询：sender=%s", sender_id)
+            logger.info("[视奸面板] 用户黑名单命中，拒绝查询：发送者ID：%s", sender_id)
             return "你已被禁止使用该查询喵。"
 
         return None
@@ -94,11 +77,6 @@ class LiveDashboardPlugin(star.Star):
     async def _query_dashboard_message(self) -> tuple[str, int]:
         """复用核心查询逻辑，返回渲染文本与展示设备数量。"""
         message, render_device_count = await self.dashboard_service.query_and_render()
-        logger.info(
-            "[视奸面板] 状态查询完成，reply_chars=%s, render_devices=%s",
-            len(message),
-            render_device_count,
-        )
         return message, render_device_count
 
     @filter.on_llm_request()
@@ -124,12 +102,14 @@ class LiveDashboardPlugin(star.Star):
         Args:
             event(object): AstrBot 消息事件上下文（由框架注入）。
         """
-        sender_id = str(event.get_sender_id() or "").strip()
+        user_id = str(event.get_sender_id() or "").strip()
+        bot_id = str(event.get_self_id() or "").strip()
         session_id = str(getattr(event.message_obj, "session_id", "") or "").strip()
         logger.info(
-            "[视奸面板] LLM 工具触发状态查询，sender=%s, session=%s",
-            sender_id or "unknown",
-            session_id or "unknown",
+            "[视奸面板] LLM 工具触发状态查询，机器人ID：%s, 用户ID：%s, 会话：%s",
+            bot_id or "未知",
+            user_id or "未知",
+            session_id or "未知",
         )
 
         # 与命令路径保持一致：先做权限与黑名单拦截，再发起查询。
@@ -164,9 +144,9 @@ class LiveDashboardPlugin(star.Star):
         session_id = str(getattr(event.message_obj, "session_id", "") or "").strip()
 
         logger.info(
-            "[视奸面板] 收到状态查询指令，sender=%s, session=%s",
-            sender_id or "unknown",
-            session_id or "unknown",
+            "[视奸面板] 收到状态查询指令，发送者：%s, 会话：%s",
+            sender_id or "未知",
+            session_id or "未知",
         )
 
         denied_text = self._get_query_denied_text(event)

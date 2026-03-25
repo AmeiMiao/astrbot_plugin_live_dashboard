@@ -251,16 +251,12 @@ def _mask_sensitive_text(text: str, keywords: list[str], replacement: str) -> st
     return text
 
 
-def _apply_device_keyword_filters(
-    device_items: list[dict[str, Any]], config: dict[str, Any]
+def _apply_device_keyword_filters_with_keywords(
+    device_items: list[dict[str, Any]],
+    whitelist_keywords: list[str],
+    blacklist_keywords: list[str],
 ) -> list[dict[str, Any]]:
-    """按配置对白名单/黑名单关键词进行设备筛选。"""
-    whitelist_raw = get_text_value(config, "device_whitelist_keywords", "")
-    blacklist_raw = get_text_value(config, "device_blacklist_keywords", "")
-
-    whitelist_keywords = _parse_keyword_list(whitelist_raw)
-    blacklist_keywords = _parse_keyword_list(blacklist_raw)
-
+    """按已解析关键词对白名单/黑名单进行设备筛选。"""
     filtered_items = device_items
 
     # 白名单：仅保留命中关键词的设备。
@@ -288,6 +284,23 @@ def _apply_device_keyword_filters(
     )
 
     return filtered_items
+
+
+def _apply_device_keyword_filters(
+    device_items: list[dict[str, Any]], config: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """按配置对白名单/黑名单关键词进行设备筛选。"""
+    whitelist_raw = get_text_value(config, "device_whitelist_keywords", "")
+    blacklist_raw = get_text_value(config, "device_blacklist_keywords", "")
+
+    whitelist_keywords = _parse_keyword_list(whitelist_raw)
+    blacklist_keywords = _parse_keyword_list(blacklist_raw)
+
+    return _apply_device_keyword_filters_with_keywords(
+        device_items,
+        whitelist_keywords,
+        blacklist_keywords,
+    )
 
 
 def _pick_device_items(
@@ -345,9 +358,21 @@ def render_dashboard_message(
         else []
     )
 
+    # 关键词配置先解析一次，供统计与设备挑选复用，避免重复解析。
+    whitelist_keywords = _parse_keyword_list(
+        get_text_value(config, "device_whitelist_keywords", "")
+    )
+    blacklist_keywords = _parse_keyword_list(
+        get_text_value(config, "device_blacklist_keywords", "")
+    )
+
     # 头部统计口径：先应用关键词黑白名单，再统计在线/总数。
     # 这样“在线设备 x/y”会和过滤结果一致。
-    counted_devices = _apply_device_keyword_filters(all_devices, config)
+    counted_devices = _apply_device_keyword_filters_with_keywords(
+        all_devices,
+        whitelist_keywords,
+        blacklist_keywords,
+    )
     total_count = len(counted_devices)
     online_count = sum(1 for item in counted_devices if _is_online(item))
 
@@ -360,6 +385,8 @@ def render_dashboard_message(
     show_last_seen = get_bool_value(config, "show_last_seen", True)
     show_viewer_count = get_bool_value(config, "show_viewer_count", False)
     show_server_time = get_bool_value(config, "show_server_time", False)
+    include_offline_devices = get_bool_value(config, "include_offline_devices", False)
+    max_devices = get_int_value(config, "max_devices", 10, min_value=1, max_value=100)
 
     info_blacklist_keywords = _parse_keyword_list(
         get_text_value(config, "info_blacklist_keywords", "")
@@ -398,8 +425,21 @@ def render_dashboard_message(
         if isinstance(server_time, str) and server_time.strip():
             lines.append(f"服务端时间：{format_time_text(server_time)}")
 
-    # 挑选实际展示设备列表。
-    device_items = _pick_device_items(payload_data, config)
+    # 基于同一份筛选结果继续处理展示列表，避免重复筛选/解析。
+    device_items = counted_devices
+    if not include_offline_devices:
+        device_items = [item for item in device_items if _is_online(item)]
+
+    # 排序规则：在线优先，其次按设备名排序，保证输出稳定。
+    device_items.sort(
+        key=lambda item: (
+            0 if _is_online(item) else 1,
+            str(item.get("device_name", "")),
+        )
+    )
+
+    # 按 max_devices 截断，防止一次输出过长。
+    device_items = device_items[:max_devices]
     logger.debug("[视奸面板] 正在渲染设备列表...选中设备数：%s", len(device_items))
 
     # 没有可展示设备时返回简短提示。
@@ -432,13 +472,18 @@ def render_dashboard_message(
             head_text += f" ({platform_text})"
         lines.append(head_text)
 
-        # 主叙事句：现在正在…
+        # 主叙事句：现在正在…（同样应用信息黑名单脱敏策略）。
         if status_online:
             activity_text = _build_activity_description(
                 app_name_raw, display_title_raw, extra_data
             )
         else:
             activity_text = "离线休息中喵~"
+        activity_text = _mask_sensitive_text(
+            activity_text,
+            info_blacklist_keywords,
+            info_blacklist_replacement,
+        )
         lines.append(f"  现在：{activity_text}")
 
         # 应用名（可选）：命中信息黑名单关键词时替换为统一文案。

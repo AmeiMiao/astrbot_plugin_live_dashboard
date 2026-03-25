@@ -286,23 +286,6 @@ def _apply_device_keyword_filters_with_keywords(
     return filtered_items
 
 
-def _apply_device_keyword_filters(
-    device_items: list[dict[str, Any]], config: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """按配置对白名单/黑名单关键词进行设备筛选。"""
-    whitelist_raw = get_text_value(config, "device_whitelist_keywords", "")
-    blacklist_raw = get_text_value(config, "device_blacklist_keywords", "")
-
-    whitelist_keywords = _parse_keyword_list(whitelist_raw)
-    blacklist_keywords = _parse_keyword_list(blacklist_raw)
-
-    return _apply_device_keyword_filters_with_keywords(
-        device_items,
-        whitelist_keywords,
-        blacklist_keywords,
-    )
-
-
 def _select_devices_for_render(
     payload_data: dict[str, Any], config: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], int, int]:
@@ -344,14 +327,6 @@ def _select_devices_for_render(
     )
 
     return device_items[:max_devices], online_count, total_count
-
-
-def get_render_device_count(
-    payload_data: dict[str, Any], config: dict[str, Any]
-) -> int:
-    """获取最终将展示的设备数量（与渲染筛选逻辑一致）。"""
-    device_items, _, _ = _select_devices_for_render(payload_data, config)
-    return len(device_items)
 
 
 def render_dashboard_message_with_count(
@@ -508,9 +483,3 @@ def render_dashboard_message_with_count(
     return rendered, len(device_items)
 
 
-def render_dashboard_message(
-    payload_data: dict[str, Any], config: dict[str, Any]
-) -> str:
-    """将 /api/current 返回数据渲染为更接近上游前端风格的回复文本。"""
-    rendered, _ = render_dashboard_message_with_count(payload_data, config)
-    return rendered

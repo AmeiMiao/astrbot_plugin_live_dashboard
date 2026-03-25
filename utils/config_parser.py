@@ -42,6 +42,28 @@ def get_bool_value(config: dict[str, Any], key: str, default: bool = False) -> b
     return bool(value)
 
 
+def parse_list_config(raw_text: str, *, to_lower: bool = False) -> list[str]:
+    """解析列表型文本配置（支持逗号/分号/换行分隔）。
+
+    Args:
+        raw_text: 原始配置文本。
+        to_lower: 是否把结果统一转为小写。
+    """
+    separators = [",", "，", ";", "；", "\n", "\r", "\t"]
+    normalized = raw_text
+    for separator in separators:
+        normalized = normalized.replace(separator, ",")
+
+    values: list[str] = []
+    for part in normalized.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        values.append(value.lower() if to_lower else value)
+
+    return values
+
+
 def get_int_value(
     config: dict[str, Any],
     key: str,

@@ -44,7 +44,7 @@ def _is_online(device_item: dict[str, Any]) -> bool:
         return value == 1
     # 字符串做兼容解析。
     if isinstance(value, str):
-        return value.strip() in {"1", "true", "True"}
+        return value.strip().lower() in {"1", "true"}
 
     # 其他未知类型默认按离线处理（保守策略）。
     return False

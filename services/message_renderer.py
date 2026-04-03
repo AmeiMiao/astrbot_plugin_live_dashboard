@@ -182,19 +182,6 @@ def _format_heart_rate(
             # 时间戳异常时退回普通心率显示，避免影响主流程。
             pass
 
-    changed_at = extra_data.get("heart_rate_changed_at")
-    if isinstance(changed_at, str) and changed_at.strip():
-        try:
-            changed_dt = datetime.fromisoformat(changed_at.replace("Z", "+00:00"))
-            if changed_dt.tzinfo is None:
-                changed_dt = changed_dt.replace(tzinfo=timezone.utc)
-
-            if (now_dt - changed_dt).total_seconds() >= stale_seconds:
-                return f"{bpm} bpm（数值长时间未变化,可能是卡了）"
-        except ValueError:
-            # 时间戳异常时退回普通心率显示，避免影响主流程。
-            pass
-
     return f"{bpm} bpm"
 
 

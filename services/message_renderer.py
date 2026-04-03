@@ -152,7 +152,9 @@ def _format_music(extra_data: dict[str, Any]) -> str:
     return core_text
 
 
-def _format_heart_rate(extra_data: dict[str, Any], stale_seconds: int) -> str:
+def _format_heart_rate(
+    extra_data: dict[str, Any], stale_seconds: int, stale_minutes: int
+) -> str:
     """格式化心率文本。"""
     heart_rate = extra_data.get("heart_rate")
     if not isinstance(heart_rate, (int, float)):
@@ -172,7 +174,10 @@ def _format_heart_rate(extra_data: dict[str, Any], stale_seconds: int) -> str:
                 updated_dt = updated_dt.replace(tzinfo=timezone.utc)
 
             if (now_dt - updated_dt).total_seconds() >= stale_seconds:
-                return "30分钟内无有效数据,应该是手表没带好呢 不是真似了喵(⁎˃ᆺ˂)"
+                return (
+                    f"{stale_minutes}分钟内无有效数据,应该是手表没带好呢 "
+                    "不是真似了喵(⁎˃ᆺ˂)"
+                )
         except ValueError:
             # 时间戳异常时退回普通心率显示，避免影响主流程。
             pass
@@ -521,6 +526,7 @@ def render_dashboard_message_with_count(
             heart_rate_text = _format_heart_rate(
                 extra_data,
                 heart_rate_stale_seconds,
+                heart_rate_stale_minutes,
             )
             lines.append(f"  ❤️ 心率：{heart_rate_text}")
 

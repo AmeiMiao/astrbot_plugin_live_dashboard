@@ -540,9 +540,9 @@ def render_dashboard_message_with_count(
         if show_last_seen:
             last_seen = device_item.get("last_seen_at")
             if isinstance(last_seen, str) and last_seen.strip():
-                lines.append(f"  🕒 上报：{format_time_text(last_seen)}")
+                lines.append(f"  🕒 设备上报时间：{format_time_text(last_seen)}")
             else:
-                lines.append("  🕒 上报：暂无上报")
+                lines.append("  🕒 设备上报时间：暂无上报")
 
         # 每台设备之间留一个空行。
         lines.append("")

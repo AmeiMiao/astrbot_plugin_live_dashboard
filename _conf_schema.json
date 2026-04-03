@@ -91,6 +91,11 @@
     "type": "bool",
     "default": true
   },
+  "show_heart_rate": {
+    "description": "显示心率信息（仅 Android 设备）",
+    "type": "bool",
+    "default": true
+  },
   "show_last_seen": {
     "description": "显示最后上报时间",
     "type": "bool",

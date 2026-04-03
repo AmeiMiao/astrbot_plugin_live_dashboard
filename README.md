@@ -100,6 +100,7 @@
   - 展示标题（`display_title`）
   - 电量与充电状态
   - 音乐信息
+  - 心率信息（仅 Android 设备）
   - 最后上报时间
 
 ## 📊 输出示例
@@ -123,6 +124,7 @@
   标题：推荐 - 哔哩哔哩
   🔋 电量：62% 未充电
   🎵 音乐：暂无播放
+  ❤️ 心率：85 bpm
   🕒 上报：03-24 19:42:08
 ```
 
@@ -225,6 +227,7 @@
 | `show_display_title` | bool | `true` | 显示 `display_title` |
 | `show_battery` | bool | `true` | 显示电量信息 |
 | `show_music` | bool | `true` | 显示音乐信息 |
+| `show_heart_rate` | bool | `true` | 显示心率信息（仅 Android 设备） |
 | `show_last_seen` | bool | `true` | 显示最后上报时间 |
 | `show_viewer_count` | bool | `false` | 显示访客数 |
 | `show_server_time` | bool | `false` | 显示服务端时间 |

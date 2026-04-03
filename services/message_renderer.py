@@ -148,6 +148,19 @@ def _format_music(extra_data: dict[str, Any]) -> str:
     return core_text
 
 
+def _format_heart_rate(extra_data: dict[str, Any]) -> str:
+    """格式化心率文本。"""
+    heart_rate = extra_data.get("heart_rate")
+    if not isinstance(heart_rate, (int, float)):
+        return "未知"
+
+    bpm = round(float(heart_rate))
+    if bpm <= 0:
+        return "未知"
+
+    return f"{bpm} bpm"
+
+
 def _steam_title_to_description(display_title: str) -> str:
     """复刻上游 Steam 模板的特殊判断逻辑。"""
     title_lower = display_title.lower()
@@ -344,6 +357,7 @@ def render_dashboard_message_with_count(
     show_display_title = get_bool_value(config, "show_display_title", True)
     show_battery = get_bool_value(config, "show_battery", True)
     show_music = get_bool_value(config, "show_music", True)
+    show_heart_rate = get_bool_value(config, "show_heart_rate", True)
     show_last_seen = get_bool_value(config, "show_last_seen", True)
     show_viewer_count = get_bool_value(config, "show_viewer_count", False)
     show_server_time = get_bool_value(config, "show_server_time", False)
@@ -461,6 +475,11 @@ def render_dashboard_message_with_count(
         if show_music:
             music_text = _format_music(extra_data)
             lines.append(f"  🎵 音乐：{music_text}")
+
+        # 心率（可选，仅 Android 设备）。
+        if show_heart_rate and platform_text.lower() == "android":
+            heart_rate_text = _format_heart_rate(extra_data)
+            lines.append(f"  ❤️ 心率：{heart_rate_text}")
 
         # 最后上报时间（可选）。
         if show_last_seen:

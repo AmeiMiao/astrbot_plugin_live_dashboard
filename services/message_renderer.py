@@ -152,37 +152,52 @@ def _format_music(extra_data: dict[str, Any]) -> str:
     return core_text
 
 
-def _format_heart_rate(
-    extra_data: dict[str, Any], stale_seconds: int, stale_minutes: int
-) -> str:
-    """格式化心率文本。"""
+def _build_heart_rate_lines(
+    extra_data: dict[str, Any],
+    stale_seconds: int,
+    stale_minutes: int,
+    server_time: str,
+) -> list[str]:
+    """格式化心率文本行。"""
     heart_rate = extra_data.get("heart_rate")
     if not isinstance(heart_rate, (int, float)):
-        return "未知"
+        return ["  ❤️ 心率：未知"]
 
     bpm = round(float(heart_rate))
     if bpm <= 0:
-        return "未知"
+        return ["  ❤️ 心率：未知"]
 
-    now_dt = datetime.now(timezone.utc)
+    lines = [f"  ❤️ 心率：{bpm} bpm"]
+
+    now_dt: datetime | None = None
+    if server_time.strip():
+        try:
+            now_dt = datetime.fromisoformat(server_time.replace("Z", "+00:00"))
+            if now_dt.tzinfo is None:
+                now_dt = now_dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            now_dt = None
 
     updated_at = extra_data.get("heart_rate_updated_at")
     if isinstance(updated_at, str) and updated_at.strip():
+        lines.append(f"  🕒 心率更新时间：{format_time_text(updated_at)}")
         try:
+            if now_dt is None:
+                return lines
             updated_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
             if updated_dt.tzinfo is None:
                 updated_dt = updated_dt.replace(tzinfo=timezone.utc)
 
             if (now_dt - updated_dt).total_seconds() >= stale_seconds:
-                return (
-                    f"{stale_minutes}分钟内无有效数据,应该是手表没带好呢 "
+                lines.append(
+                    f"  {stale_minutes}分钟内无有效数据,应该是手表没带好呢 "
                     "不是真似了喵(⁎˃ᆺ˂)"
                 )
         except ValueError:
             # 时间戳异常时退回普通心率显示，避免影响主流程。
             pass
 
-    return f"{bpm} bpm"
+    return lines
 
 
 def _steam_title_to_description(display_title: str) -> str:
@@ -425,10 +440,13 @@ def render_dashboard_message_with_count(
             lines.append(f"当前访客：{viewer_count}")
 
     # 可选展示服务端时间。
+    server_time = ""
     if show_server_time:
-        server_time = payload_data.get("server_time")
-        if isinstance(server_time, str) and server_time.strip():
+        server_time = str(payload_data.get("server_time") or "").strip()
+        if server_time:
             lines.append(f"服务端时间：{format_time_text(server_time)}")
+    else:
+        server_time = str(payload_data.get("server_time") or "").strip()
 
     logger.debug("[视奸面板] 正在渲染设备列表...选中设备数：%s", len(device_items))
 
@@ -510,12 +528,13 @@ def render_dashboard_message_with_count(
 
         # 心率（可选，仅 Android 设备）。
         if show_heart_rate and platform_text.lower() == "android":
-            heart_rate_text = _format_heart_rate(
+            heart_rate_lines = _build_heart_rate_lines(
                 extra_data,
                 heart_rate_stale_seconds,
                 heart_rate_stale_minutes,
+                server_time,
             )
-            lines.append(f"  ❤️ 心率：{heart_rate_text}")
+            lines.extend(heart_rate_lines)
 
         # 最后上报时间（可选）。
         if show_last_seen:

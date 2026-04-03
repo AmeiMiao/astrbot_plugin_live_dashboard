@@ -96,6 +96,12 @@
     "type": "bool",
     "default": true
   },
+  "heart_rate_stale_minutes": {
+    "description": "心率异常阈值（分钟）",
+    "type": "int",
+    "default": 30,
+    "hint": "当心率超过该分钟数未更新时，提示无有效数据；若持续更新但数值超过该分钟数未变化，则提示可能卡住。"
+  },
   "show_last_seen": {
     "description": "显示最后上报时间",
     "type": "bool",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 from typing import Any
 
@@ -24,6 +25,9 @@ from .app_descriptions import (
     MUSIC_APP_NAMES,
     TITLE_TEMPLATES_LOWER,
 )
+
+
+DEFAULT_HEART_RATE_STALE_MINUTES = 30
 
 
 def _is_online(device_item: dict[str, Any]) -> bool:
@@ -148,7 +152,7 @@ def _format_music(extra_data: dict[str, Any]) -> str:
     return core_text
 
 
-def _format_heart_rate(extra_data: dict[str, Any]) -> str:
+def _format_heart_rate(extra_data: dict[str, Any], stale_seconds: int) -> str:
     """格式化心率文本。"""
     heart_rate = extra_data.get("heart_rate")
     if not isinstance(heart_rate, (int, float)):
@@ -157,6 +161,34 @@ def _format_heart_rate(extra_data: dict[str, Any]) -> str:
     bpm = round(float(heart_rate))
     if bpm <= 0:
         return "未知"
+
+    now_dt = datetime.now(timezone.utc)
+
+    updated_at = extra_data.get("heart_rate_updated_at")
+    if isinstance(updated_at, str) and updated_at.strip():
+        try:
+            updated_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            if updated_dt.tzinfo is None:
+                updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+
+            if (now_dt - updated_dt).total_seconds() >= stale_seconds:
+                return "30分钟内无有效数据,应该是手表没带好呢 不是真似了喵(⁎˃ᆺ˂)"
+        except ValueError:
+            # 时间戳异常时退回普通心率显示，避免影响主流程。
+            pass
+
+    changed_at = extra_data.get("heart_rate_changed_at")
+    if isinstance(changed_at, str) and changed_at.strip():
+        try:
+            changed_dt = datetime.fromisoformat(changed_at.replace("Z", "+00:00"))
+            if changed_dt.tzinfo is None:
+                changed_dt = changed_dt.replace(tzinfo=timezone.utc)
+
+            if (now_dt - changed_dt).total_seconds() >= stale_seconds:
+                return f"{bpm} bpm（数值长时间未变化,可能是卡了）"
+        except ValueError:
+            # 时间戳异常时退回普通心率显示，避免影响主流程。
+            pass
 
     return f"{bpm} bpm"
 
@@ -358,6 +390,14 @@ def render_dashboard_message_with_count(
     show_battery = get_bool_value(config, "show_battery", True)
     show_music = get_bool_value(config, "show_music", True)
     show_heart_rate = get_bool_value(config, "show_heart_rate", True)
+    heart_rate_stale_minutes = get_int_value(
+        config,
+        "heart_rate_stale_minutes",
+        DEFAULT_HEART_RATE_STALE_MINUTES,
+        min_value=1,
+        max_value=24 * 60,
+    )
+    heart_rate_stale_seconds = heart_rate_stale_minutes * 60
     show_last_seen = get_bool_value(config, "show_last_seen", True)
     show_viewer_count = get_bool_value(config, "show_viewer_count", False)
     show_server_time = get_bool_value(config, "show_server_time", False)
@@ -478,7 +518,10 @@ def render_dashboard_message_with_count(
 
         # 心率（可选，仅 Android 设备）。
         if show_heart_rate and platform_text.lower() == "android":
-            heart_rate_text = _format_heart_rate(extra_data)
+            heart_rate_text = _format_heart_rate(
+                extra_data,
+                heart_rate_stale_seconds,
+            )
             lines.append(f"  ❤️ 心率：{heart_rate_text}")
 
         # 最后上报时间（可选）。

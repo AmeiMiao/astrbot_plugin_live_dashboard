@@ -507,14 +507,18 @@ def render_dashboard_message_with_count(
         # display_title（可选）：命中信息黑名单关键词时替换为统一文案。
         if show_display_title:
             normalized_title = _normalize_display_title(display_title_raw, app_name_raw)
+            is_android_device = platform_text.lower() == "android"
             title_text = normalized_title or "（无可展示标题）"
-            if normalized_title:
+            if is_android_device and not normalized_title:
+                title_text = ""
+            elif normalized_title:
                 title_text = _mask_sensitive_text(
                     normalized_title,
                     info_blacklist_keywords,
                     info_blacklist_replacement,
                 )
-            lines.append(f"  标题：{title_text}")
+            if title_text:
+                lines.append(f"  标题：{title_text}")
 
         # 电量（可选）。
         if show_battery:

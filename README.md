@@ -228,6 +228,8 @@
 | `show_battery` | bool | `true` | 显示电量信息 |
 | `show_music` | bool | `true` | 显示音乐信息 |
 | `show_heart_rate` | bool | `true` | 显示心率信息（仅 Android 设备） |
+| `heart_rate_stale_minutes` | int | `30` | 心率异常阈值（分钟） |
+| `heart_rate_trend_window_minutes` | int | `60` | 心率趋势摘要统计窗口（分钟） |
 | `show_last_seen` | bool | `true` | 显示最后上报时间 |
 | `show_viewer_count` | bool | `false` | 显示访客数 |
 | `show_server_time` | bool | `false` | 显示服务端时间 |

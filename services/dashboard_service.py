@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -13,11 +14,70 @@ from ..utils.config_parser import get_int_value
 from .message_renderer import render_dashboard_message_with_count
 
 # 请求层：负责向 Live Dashboard 拉取原始状态数据。
-from .payload_client import fetch_current_payload
+from .payload_client import fetch_current_payload, fetch_health_records
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    """解析 ISO 时间，统一补齐时区信息。"""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _build_heart_rate_trend_payload(
+    payload: dict[str, Any], health_records: list[dict[str, Any]], trend_window_minutes: int
+) -> dict[str, dict[str, int]]:
+    """按设备汇总指定时间窗内的心率趋势统计。"""
+    server_time_text = str(payload.get("server_time") or "").strip()
+    server_dt = _parse_iso_datetime(server_time_text) or datetime.now(timezone.utc)
+    window_start = server_dt - timedelta(minutes=trend_window_minutes)
+
+    trend_by_device: dict[str, dict[str, int]] = {}
+    for record in health_records:
+        if record.get("type") != "heart_rate":
+            continue
+
+        device_id = str(record.get("device_id") or "").strip()
+        if not device_id:
+            continue
+
+        value = record.get("value")
+        if not isinstance(value, (int, float)):
+            continue
+
+        recorded_at_text = str(record.get("recorded_at") or "").strip()
+        recorded_dt = _parse_iso_datetime(recorded_at_text)
+        if recorded_dt is None or recorded_dt < window_start or recorded_dt > server_dt:
+            continue
+
+        rounded_value = round(float(value))
+        existing = trend_by_device.get(device_id)
+        if existing is None:
+            trend_by_device[device_id] = {
+                "count": 1,
+                "sum": rounded_value,
+                "min": rounded_value,
+                "max": rounded_value,
+            }
+            continue
+
+        existing["count"] += 1
+        existing["sum"] += rounded_value
+        existing["min"] = min(existing["min"], rounded_value)
+        existing["max"] = max(existing["max"], rounded_value)
+
+    return trend_by_device
 
 
 class DashboardService:
     """业务编排层：负责调用外部接口并渲染回复文本。"""
+
+    _HEALTH_RECORD_CACHE_TTL_SECONDS = 30
 
     def __init__(self, config: dict[str, Any]):
         """保存插件配置，供后续请求和渲染阶段使用。"""
@@ -26,9 +86,49 @@ class DashboardService:
             config, "request_timeout_sec", 30, min_value=1, max_value=60
         )
         self._http_client = httpx.AsyncClient(timeout=timeout_sec)
+        self._health_record_cache: dict[
+            tuple[str, int], tuple[datetime, list[dict[str, Any]]]
+        ] = {}
+
+    async def _get_health_records_with_cache(
+        self, date_text: str, tz_offset_minutes: int
+    ) -> list[dict[str, Any]]:
+        """读取健康记录，并在 30 秒内复用同日查询结果。"""
+        cache_key = (date_text, tz_offset_minutes)
+        now_dt = datetime.now(timezone.utc)
+        expired_keys = [
+            key
+            for key, (cached_at, _) in self._health_record_cache.items()
+            if (now_dt - cached_at).total_seconds() >= self._HEALTH_RECORD_CACHE_TTL_SECONDS
+        ]
+        for expired_key in expired_keys:
+            self._health_record_cache.pop(expired_key, None)
+
+        cached_entry = self._health_record_cache.get(cache_key)
+        if cached_entry is not None:
+            cached_at, cached_records = cached_entry
+            cache_age = (now_dt - cached_at).total_seconds()
+            if cache_age < self._HEALTH_RECORD_CACHE_TTL_SECONDS:
+                logger.debug(
+                    "[视奸面板] 命中健康数据缓存：date=%s tz=%s age=%.1fs",
+                    date_text,
+                    tz_offset_minutes,
+                    cache_age,
+                )
+                return cached_records
+
+        records = await fetch_health_records(
+            self.config,
+            date_text,
+            tz_offset_minutes,
+            client=self._http_client,
+        )
+        self._health_record_cache[cache_key] = (now_dt, records)
+        return records
 
     async def close(self) -> None:
         """释放服务层资源。"""
+        self._health_record_cache.clear()
         await self._http_client.aclose()
         logger.info("[视奸面板] HTTP 客户端已关闭")
 
@@ -47,6 +147,44 @@ class DashboardService:
 
             # 从上游拉取当前状态 payload（dict）。
             payload = await fetch_current_payload(self.config, client=self._http_client)
+
+            server_dt = _parse_iso_datetime(str(payload.get("server_time") or "").strip())
+            if server_dt is None:
+                server_dt = datetime.now(timezone.utc)
+
+            trend_window_minutes = get_int_value(
+                self.config,
+                "heart_rate_trend_window_minutes",
+                60,
+                min_value=5,
+                max_value=24 * 60,
+            )
+
+            tz_offset_minutes = (
+                int(server_dt.utcoffset().total_seconds() // 60)
+                if server_dt.utcoffset()
+                else 0
+            )
+
+            query_dates = {server_dt.date().isoformat()}
+            window_start = server_dt - timedelta(minutes=trend_window_minutes)
+            query_dates.add(window_start.date().isoformat())
+
+            health_records: list[dict[str, Any]] = []
+            for date_text in sorted(query_dates):
+                health_records.extend(
+                    await self._get_health_records_with_cache(
+                        date_text,
+                        tz_offset_minutes,
+                    )
+                )
+
+            payload["heart_rate_trend_window_minutes"] = trend_window_minutes
+            payload["heart_rate_trend"] = _build_heart_rate_trend_payload(
+                payload,
+                health_records,
+                trend_window_minutes,
+            )
 
             # 仅用于调试观察：统计上游返回的设备数量。
             device_count = (

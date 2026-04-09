@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -34,6 +34,15 @@ def _build_url(config: dict[str, Any]) -> str:
     # 去掉 base_url 末尾斜杠，防止出现 //api/current。
     base_url = get_text_value(config, "base_url", "").rstrip("/")
     return f"{base_url}/api/current"
+
+
+def _build_health_data_url(
+    config: dict[str, Any], date_text: str, tz_offset_minutes: int
+) -> str:
+    """拼接上游 health-data 查询接口完整 URL。"""
+    base_url = get_text_value(config, "base_url", "").rstrip("/")
+    query = urlencode({"date": date_text, "tz": tz_offset_minutes})
+    return f"{base_url}/api/health-data?{query}"
 
 
 def _mask_url_for_log(url: str) -> str:
@@ -97,3 +106,50 @@ async def fetch_current_payload(
     # 仅在 DEBUG 下输出字段概览，避免 INFO 日志过载。
     logger.debug("[视奸面板] 响应解析完成，字段列表：%s", list(data.keys()))
     return data
+
+
+async def fetch_health_records(
+    config: dict[str, Any],
+    date_text: str,
+    tz_offset_minutes: int,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict[str, Any]]:
+    """获取指定日期的健康记录列表。"""
+    timeout_sec = get_int_value(
+        config, "request_timeout_sec", 30, min_value=1, max_value=60
+    )
+    url = _build_health_data_url(config, date_text, tz_offset_minutes)
+    headers = _build_headers(config)
+
+    owns_client = client is None
+    request_client = client or httpx.AsyncClient(timeout=timeout_sec)
+
+    timeout_log_text = f"{timeout_sec}秒" if owns_client else "外部client配置"
+    logger.info(
+        "[视奸面板] 已发起健康数据请求，地址：%s, 超时：%s",
+        _mask_url_for_log(url),
+        timeout_log_text,
+    )
+
+    try:
+        response = await request_client.get(url, headers=headers)
+        logger.info("[视奸面板] 健康数据响应状态码：%s", response.status_code)
+        response.raise_for_status()
+        data = response.json()
+    finally:
+        if owns_client:
+            await request_client.aclose()
+
+    if not isinstance(data, dict):
+        logger.error("[视奸面板] 健康数据结构异常：响应体不是 JSON 对象")
+        raise ValueError("/api/health-data 响应不是 JSON 对象")
+
+    records = data.get("records", [])
+    if not isinstance(records, list):
+        logger.error("[视奸面板] 健康数据结构异常：records 不是数组")
+        raise ValueError("/api/health-data records 字段不是数组")
+
+    normalized_records = [item for item in records if isinstance(item, dict)]
+    logger.debug("[视奸面板] 健康数据解析完成，记录数：%s", len(normalized_records))
+    return normalized_records

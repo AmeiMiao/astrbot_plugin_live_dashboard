@@ -157,6 +157,8 @@ def _build_heart_rate_lines(
     stale_seconds: int,
     stale_minutes: int,
     server_time: str,
+    trend_data: dict[str, Any] | None = None,
+    trend_window_minutes: int = 60,
 ) -> list[str]:
     """格式化心率文本行。"""
     heart_rate = extra_data.get("heart_rate")
@@ -196,6 +198,23 @@ def _build_heart_rate_lines(
         except ValueError:
             # 时间戳异常时退回普通心率显示，避免影响主流程。
             pass
+
+    if isinstance(trend_data, dict):
+        valid_point_count = trend_data.get("count")
+        window_label = f"最近{trend_window_minutes}分钟"
+        if isinstance(valid_point_count, int) and valid_point_count > 0:
+            if valid_point_count == 1:
+                lines.append(f"  📈 心率趋势（{window_label}）：数据不足，仅 1 个有效点")
+            else:
+                average_sum = trend_data.get("sum")
+                minimum = trend_data.get("min")
+                maximum = trend_data.get("max")
+                if all(isinstance(item, int) for item in (average_sum, minimum, maximum)):
+                    average = round(average_sum / valid_point_count)
+                    lines.append(f"  📈 心率趋势（{window_label}）：")
+                    lines.append(
+                        f"  📊 平均 {average} / 最低 {minimum} / 最高 {maximum} bpm"
+                    )
 
     return lines
 
@@ -405,6 +424,13 @@ def render_dashboard_message_with_count(
         max_value=24 * 60,
     )
     heart_rate_stale_seconds = heart_rate_stale_minutes * 60
+    heart_rate_trend_window_minutes = get_int_value(
+        config,
+        "heart_rate_trend_window_minutes",
+        60,
+        min_value=5,
+        max_value=24 * 60,
+    )
     show_last_seen = get_bool_value(config, "show_last_seen", True)
     show_viewer_count = get_bool_value(config, "show_viewer_count", False)
     show_server_time = get_bool_value(config, "show_server_time", False)
@@ -532,11 +558,19 @@ def render_dashboard_message_with_count(
 
         # 心率（可选，仅 Android 设备）。
         if show_heart_rate and platform_text.lower() == "android":
+            heart_rate_trend_map = payload_data.get("heart_rate_trend", {})
+            trend_data = None
+            if isinstance(heart_rate_trend_map, dict):
+                candidate = heart_rate_trend_map.get(device_item.get("device_id"))
+                if isinstance(candidate, dict):
+                    trend_data = candidate
             heart_rate_lines = _build_heart_rate_lines(
                 extra_data,
                 heart_rate_stale_seconds,
                 heart_rate_stale_minutes,
                 server_time,
+                trend_data,
+                heart_rate_trend_window_minutes,
             )
             lines.extend(heart_rate_lines)
 
